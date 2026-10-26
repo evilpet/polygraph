@@ -1,0 +1,137 @@
+diff --git a/package.json b/package.json
+index aa4dd69..f088210 100644
+--- a/package.json
++++ b/package.json
+@@ -5,6 +5,7 @@
+   "main": "index.js",
+   "scripts": {
+     "dev": "vite --host",
++    "test": "node --test tests/*.test.mjs",
+     "build": "node -e \"const fs=require('fs'); let h=fs.readFileSync('index.html','utf8').replace(/src=\\\"\\.\\/assets\\/index-[^\\\"]+\\.js\\\"/g, 'src=\\\"/src/main.js\\\"'); fs.writeFileSync('index.html',h);\" && vite build && cp -r dist/assets . && cp dist/index.html .",
+     "preview": "vite preview",
+     "deploy": "npx gh-pages -d dist"
+diff --git a/src/main.js b/src/main.js
+index 1db32d5..b21e15a 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -6,6 +6,7 @@ import { STIRiskCalculator } from './riskCalculator.js';
+ import { ChartsManager } from './chartsManager.js';
+ import { PartnerOptimizer } from './partnerOptimizer.js';
+ import { ProfileManager } from './profileManager.js';
++import { safeMerge } from './safeMerge.js';
+ 
+ class AppController {
+   constructor() {
+@@ -336,8 +337,11 @@ class AppController {
+       const savedState = localStorage.getItem('polygraph_user_profile');
+       if (savedState) {
+         const parsed = JSON.parse(savedState);
+-        if (parsed.params) Object.assign(this.params, parsed.params);
+-        if (parsed.prophylactics) Object.assign(this.prophylactics, parsed.prophylactics);
++        // Safe merge: localStorage content is attacker-writable (e.g. via a
++        // crafted share link); plain Object.assign would let an own __proto__
++        // key replace this.params' prototype (prototype pollution).
++        if (parsed.params) safeMerge(this.params, parsed.params);
++        if (parsed.prophylactics) safeMerge(this.prophylactics, parsed.prophylactics);
+         
+         this.presetConfigs.me = {
+           ...this.params,
+diff --git a/src/safeMerge.js b/src/safeMerge.js
+new file mode 100644
+index 0000000..e2b78e7
+--- /dev/null
++++ b/src/safeMerge.js
+@@ -0,0 +1,26 @@
++/**
++ * safeMerge - prototype-pollution-safe object merge for untrusted JSON.
++ *
++ * Object.assign/`{...src}` semantics are unsafe for attacker-controlled data:
++ * an own `__proto__` key (as produced by JSON.parse('{"__proto__":{...}}'))
++ * triggers the prototype setter and replaces the target's prototype.
++ * safeMerge copies own enumerable keys while skipping the dangerous keys.
++ */
++const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
++
++/**
++ * Merge own properties of `source` into `target`, skipping keys that could
++ * alter the target's prototype chain. Returns `target`.
++ *
++ * @param {object} target - object to merge into
++ * @param {object|null|undefined} source - untrusted object to merge from
++ * @returns {object} target
++ */
++export function safeMerge(target, source) {
++  if (!source || typeof source !== 'object' || Array.isArray(source)) return target;
++  for (const key of Object.keys(source)) {
++    if (DANGEROUS_KEYS.has(key)) continue;
++    target[key] = source[key];
++  }
++  return target;
++}
+diff --git a/tests/safeMerge.test.mjs b/tests/safeMerge.test.mjs
+new file mode 100644
+index 0000000..7312dd6
+--- /dev/null
++++ b/tests/safeMerge.test.mjs
+@@ -0,0 +1,61 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { safeMerge } from '../src/safeMerge.js';
++
++// A payload shaped exactly like a crafted localStorage profile:
++// JSON.parse creates an OWN `__proto__` key (not a real prototype change).
++const malicious = JSON.parse(
++  '{"__proto__":{"demographicProfile":"<img src=x onerror=window.__PP=1>"},"polyculePct":40,"prepActive":true}'
++);
++
++test('safeMerge copies normal own keys', () => {
++  const target = { polyculePct: 0, prepActive: false };
++  safeMerge(target, malicious);
++  assert.equal(target.polyculePct, 40);
++  assert.equal(target.prepActive, true);
++});
++
++test('safeMerge does NOT replace the target prototype', () => {
++  const target = { polyculePct: 0 };
++  safeMerge(target, malicious);
++  assert.equal(Object.getPrototypeOf(target), Object.prototype);
++  // The attacker's shadowed key must not be readable through the target
++  assert.equal(target.demographicProfile, undefined);
++});
++
++test('safeMerge does NOT pollute the global Object.prototype', () => {
++  const target = {};
++  safeMerge(target, malicious);
++  assert.equal(({}).demographicProfile, undefined, 'global Object.prototype was polluted');
++  assert.equal(({}).polluted, undefined);
++});
++
++test('safeMerge skips constructor/prototype keys too', () => {
++  const payload = JSON.parse('{"constructor":{"polluted":true},"prototype":{"polluted":2}}');
++  const target = {};
++  safeMerge(target, payload);
++  assert.equal(target.constructor.polluted, undefined);
++  assert.equal(Object.prototype.polluted, undefined);
++  assert.equal(({}).polluted, undefined);
++});
++
++test('regression guard: plain Object.assign WOULD pollute (proves the vuln class)', () => {
++  const target = {};
++  Object.assign(target, JSON.parse('{"__proto__":{"demographicProfile":"POISON"}}'));
++  // Demonstrates why safeMerge is required for untrusted JSON
++  assert.equal(target.demographicProfile, 'POISON');
++  // And safeMerge on an equivalent target does not
++  const safe = {};
++  safeMerge(safe, JSON.parse('{"__proto__":{"demographicProfile":"POISON"}}'));
++  assert.equal(safe.demographicProfile, undefined);
++  assert.equal(Object.getPrototypeOf(safe), Object.prototype);
++});
++
++test('safeMerge ignores non-object sources', () => {
++  const target = { a: 1 };
++  assert.equal(safeMerge(target, null), target);
++  assert.equal(safeMerge(target, 'str'), target);
++  assert.equal(safeMerge(target, [1, 2]), target);
++  assert.equal(safeMerge(target, 42), target);
++  assert.equal(target.a, 1);
++});

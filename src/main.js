@@ -6,6 +6,7 @@ import { STIRiskCalculator } from './riskCalculator.js';
 import { ChartsManager } from './chartsManager.js';
 import { PartnerOptimizer } from './partnerOptimizer.js';
 import { ProfileManager } from './profileManager.js';
+import { safeMerge } from './safeMerge.js';
 
 class AppController {
   constructor() {
@@ -336,8 +337,11 @@ class AppController {
       const savedState = localStorage.getItem('polygraph_user_profile');
       if (savedState) {
         const parsed = JSON.parse(savedState);
-        if (parsed.params) Object.assign(this.params, parsed.params);
-        if (parsed.prophylactics) Object.assign(this.prophylactics, parsed.prophylactics);
+        // Safe merge: localStorage content is attacker-writable (e.g. via a
+        // crafted share link); plain Object.assign would let an own __proto__
+        // key replace this.params' prototype (prototype pollution).
+        if (parsed.params) safeMerge(this.params, parsed.params);
+        if (parsed.prophylactics) safeMerge(this.prophylactics, parsed.prophylactics);
         
         this.presetConfigs.me = {
           ...this.params,
