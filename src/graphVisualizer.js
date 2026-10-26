@@ -1,5 +1,6 @@
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
+import { escapeHtml } from './htmlEscape.js';
 
 /**
  * Layouts nodes in distinct sub-network community clusters/clumps:
@@ -250,10 +251,10 @@ export class GraphVisualizer {
     else if (type.includes('monogamous')) typeColor = '#00ff87';
 
     this.tooltip.innerHTML = `
-      <div style="font-weight: 700; color: ${typeColor}; font-size: 13px;">${label}</div>
-      <div style="margin-top: 4px; color: #cbd5e1;">Type: <strong>${type.toUpperCase()}</strong></div>
-      <div style="color: #cbd5e1;">Network Distance: <strong>Degree ${degree}</strong></div>
-      <div style="color: #cbd5e1;">Partners Count: <strong>${partnersCount}</strong></div>
+      <div style="font-weight: 700; color: ${typeColor}; font-size: 13px;">${escapeHtml(label)}</div>
+      <div style="margin-top: 4px; color: #cbd5e1;">Type: <strong>${escapeHtml(type.toUpperCase())}</strong></div>
+      <div style="color: #cbd5e1;">Network Distance: <strong>Degree ${escapeHtml(degree)}</strong></div>
+      <div style="color: #cbd5e1;">Partners Count: <strong>${escapeHtml(partnersCount)}</strong></div>
     `;
 
     this.tooltip.style.display = 'block';

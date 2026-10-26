@@ -6,6 +6,7 @@ import { STIRiskCalculator } from './riskCalculator.js';
 import { ChartsManager } from './chartsManager.js';
 import { PartnerOptimizer } from './partnerOptimizer.js';
 import { ProfileManager } from './profileManager.js';
+import { escapeHtml } from './htmlEscape.js';
 
 class AppController {
   constructor() {
@@ -1146,11 +1147,11 @@ class AppController {
 
     tbody.innerHTML = pathogens.slice(0, 15).map(p => `
       <tr>
-        <td><strong>${p.name}</strong></td>
-        <td>${p.category}</td>
-        <td>${p.curable}</td>
-        <td>${p.sfHighRiskGroup || 'General'}</td>
-        <td>${p.condomTypicalEfficacy}%</td>
+        <td><strong>${escapeHtml(p.name)}</strong></td>
+        <td>${escapeHtml(p.category)}</td>
+        <td>${escapeHtml(p.curable)}</td>
+        <td>${escapeHtml(p.sfHighRiskGroup || 'General')}</td>
+        <td>${escapeHtml(p.condomTypicalEfficacy)}%</td>
       </tr>
     `).join('');
   }

@@ -1,4 +1,5 @@
 import * as echarts from 'echarts';
+import { escapeHtml } from './htmlEscape.js';
 
 export class ChartsManager {
   constructor() {
@@ -366,13 +367,14 @@ export class ChartsManager {
             qualDesc = `Minimal exposure over ${horizonStr} under current protection & network parameters.`;
           }
 
+          const isCurable = pathogen.curable === 'Yes' || (typeof pathogen.curable === 'string' && pathogen.curable.includes('Curable'));
           return `
             <div style="font-size: 14px; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-              <span>${pathogen.name}</span>
+              <span>${escapeHtml(pathogen.name)}</span>
               ${statusBadge}
             </div>
             <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">
-              ${pathogen.category} | ${pathogen.curable === 'Yes' || pathogen.curable?.includes('Curable') ? '💊 Curable with Antibiotics' : '🛡️ Chronic / Managed Pathogen'}
+              ${escapeHtml(pathogen.category)} | ${isCurable ? '💊 Curable with Antibiotics' : '🛡️ Chronic / Managed Pathogen'}
             </div>
             <div style="font-size: 11px; color: #e2e8f0; font-style: italic; background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #00f0ff;">
               "${qualDesc}"
@@ -387,7 +389,7 @@ export class ChartsManager {
               🛡️ Prophylactic Barrier Avoided: <strong>-${blocked}%</strong>
             </div>
             <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
-              💊 Primary Protocol: ${pathogen.primaryTreatment || 'Standard Care'}
+              💊 Primary Protocol: ${escapeHtml(pathogen.primaryTreatment || 'Standard Care')}
             </div>
           `;
         }

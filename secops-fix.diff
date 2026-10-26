@@ -1,0 +1,187 @@
+diff --git a/package.json b/package.json
+index aa4dd69..f088210 100644
+--- a/package.json
++++ b/package.json
+@@ -5,6 +5,7 @@
+   "main": "index.js",
+   "scripts": {
+     "dev": "vite --host",
++    "test": "node --test tests/*.test.mjs",
+     "build": "node -e \"const fs=require('fs'); let h=fs.readFileSync('index.html','utf8').replace(/src=\\\"\\.\\/assets\\/index-[^\\\"]+\\.js\\\"/g, 'src=\\\"/src/main.js\\\"'); fs.writeFileSync('index.html',h);\" && vite build && cp -r dist/assets . && cp dist/index.html .",
+     "preview": "vite preview",
+     "deploy": "npx gh-pages -d dist"
+diff --git a/src/chartsManager.js b/src/chartsManager.js
+index b517d38..f29e03f 100644
+--- a/src/chartsManager.js
++++ b/src/chartsManager.js
+@@ -1,4 +1,5 @@
+ import * as echarts from 'echarts';
++import { escapeHtml } from './htmlEscape.js';
+ 
+ export class ChartsManager {
+   constructor() {
+@@ -366,13 +367,14 @@ export class ChartsManager {
+             qualDesc = `Minimal exposure over ${horizonStr} under current protection & network parameters.`;
+           }
+ 
++          const isCurable = pathogen.curable === 'Yes' || (typeof pathogen.curable === 'string' && pathogen.curable.includes('Curable'));
+           return `
+             <div style="font-size: 14px; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+-              <span>${pathogen.name}</span>
++              <span>${escapeHtml(pathogen.name)}</span>
+               ${statusBadge}
+             </div>
+             <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">
+-              ${pathogen.category} | ${pathogen.curable === 'Yes' || pathogen.curable?.includes('Curable') ? '💊 Curable with Antibiotics' : '🛡️ Chronic / Managed Pathogen'}
++              ${escapeHtml(pathogen.category)} | ${isCurable ? '💊 Curable with Antibiotics' : '🛡️ Chronic / Managed Pathogen'}
+             </div>
+             <div style="font-size: 11px; color: #e2e8f0; font-style: italic; background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #00f0ff;">
+               "${qualDesc}"
+@@ -387,7 +389,7 @@ export class ChartsManager {
+               🛡️ Prophylactic Barrier Avoided: <strong>-${blocked}%</strong>
+             </div>
+             <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
+-              💊 Primary Protocol: ${pathogen.primaryTreatment || 'Standard Care'}
++              💊 Primary Protocol: ${escapeHtml(pathogen.primaryTreatment || 'Standard Care')}
+             </div>
+           `;
+         }
+diff --git a/src/graphVisualizer.js b/src/graphVisualizer.js
+index 8175d0e..70f443a 100644
+--- a/src/graphVisualizer.js
++++ b/src/graphVisualizer.js
+@@ -1,5 +1,6 @@
+ import Sigma from 'sigma';
+ import forceAtlas2 from 'graphology-layout-forceatlas2';
++import { escapeHtml } from './htmlEscape.js';
+ 
+ /**
+  * Layouts nodes in distinct sub-network community clusters/clumps:
+@@ -250,10 +251,10 @@ export class GraphVisualizer {
+     else if (type.includes('monogamous')) typeColor = '#00ff87';
+ 
+     this.tooltip.innerHTML = `
+-      <div style="font-weight: 700; color: ${typeColor}; font-size: 13px;">${label}</div>
+-      <div style="margin-top: 4px; color: #cbd5e1;">Type: <strong>${type.toUpperCase()}</strong></div>
+-      <div style="color: #cbd5e1;">Network Distance: <strong>Degree ${degree}</strong></div>
+-      <div style="color: #cbd5e1;">Partners Count: <strong>${partnersCount}</strong></div>
++      <div style="font-weight: 700; color: ${typeColor}; font-size: 13px;">${escapeHtml(label)}</div>
++      <div style="margin-top: 4px; color: #cbd5e1;">Type: <strong>${escapeHtml(type.toUpperCase())}</strong></div>
++      <div style="color: #cbd5e1;">Network Distance: <strong>Degree ${escapeHtml(degree)}</strong></div>
++      <div style="color: #cbd5e1;">Partners Count: <strong>${escapeHtml(partnersCount)}</strong></div>
+     `;
+ 
+     this.tooltip.style.display = 'block';
+diff --git a/src/htmlEscape.js b/src/htmlEscape.js
+new file mode 100644
+index 0000000..b22c161
+--- /dev/null
++++ b/src/htmlEscape.js
+@@ -0,0 +1,22 @@
++/**
++ * htmlEscape - minimal HTML entity escaping for values interpolated into
++ * innerHTML / HTML-formatted strings (tables, chart tooltips, graph tooltip).
++ *
++ * Escapes the five characters that are significant in HTML markup/attributes:
++ * & < > " '
++ */
++const ESCAPE_MAP = {
++  '&': '&amp;',
++  '<': '&lt;',
++  '>': '&gt;',
++  '"': '&quot;',
++  "'": '&#39;',
++};
++
++/**
++ * @param {unknown} value - any value (coerced with String())
++ * @returns {string} escaped string safe to embed in HTML
++ */
++export function escapeHtml(value) {
++  return String(value ?? '').replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
++}
+diff --git a/src/main.js b/src/main.js
+index 1db32d5..642b457 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -6,6 +6,7 @@ import { STIRiskCalculator } from './riskCalculator.js';
+ import { ChartsManager } from './chartsManager.js';
+ import { PartnerOptimizer } from './partnerOptimizer.js';
+ import { ProfileManager } from './profileManager.js';
++import { escapeHtml } from './htmlEscape.js';
+ 
+ class AppController {
+   constructor() {
+@@ -1146,11 +1147,11 @@ class AppController {
+ 
+     tbody.innerHTML = pathogens.slice(0, 15).map(p => `
+       <tr>
+-        <td><strong>${p.name}</strong></td>
+-        <td>${p.category}</td>
+-        <td>${p.curable}</td>
+-        <td>${p.sfHighRiskGroup || 'General'}</td>
+-        <td>${p.condomTypicalEfficacy}%</td>
++        <td><strong>${escapeHtml(p.name)}</strong></td>
++        <td>${escapeHtml(p.category)}</td>
++        <td>${escapeHtml(p.curable)}</td>
++        <td>${escapeHtml(p.sfHighRiskGroup || 'General')}</td>
++        <td>${escapeHtml(p.condomTypicalEfficacy)}%</td>
+       </tr>
+     `).join('');
+   }
+diff --git a/tests/htmlEscape.test.mjs b/tests/htmlEscape.test.mjs
+new file mode 100644
+index 0000000..92f7728
+--- /dev/null
++++ b/tests/htmlEscape.test.mjs
+@@ -0,0 +1,50 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import { fileURLToPath } from 'node:url';
++import { dirname, join } from 'node:path';
++import { escapeHtml } from '../src/htmlEscape.js';
++
++const __dirname = dirname(fileURLToPath(import.meta.url));
++const src = (f) => readFileSync(join(__dirname, '..', 'src', f), 'utf8');
++
++test('escapeHtml escapes all five significant characters', () => {
++  assert.equal(escapeHtml('<script>alert("x")&\'</script>'),
++    '&lt;script&gt;alert(&quot;x&quot;)&amp;&#39;&lt;/script&gt;');
++});
++
++test('escapeHtml passes through plain text unchanged', () => {
++  assert.equal(escapeHtml('Chlamydia trachomatis'), 'Chlamydia trachomatis');
++  assert.equal(escapeHtml('85%'), '85%');
++});
++
++test('escapeHtml coerces non-string / null values safely', () => {
++  assert.equal(escapeHtml(0), '0');
++  assert.equal(escapeHtml(null), '');
++  assert.equal(escapeHtml(undefined), '');
++  assert.equal(escapeHtml({}), '[object Object]');
++});
++
++// Regression guards: the CSV/profile data sinks must route their dynamic
++// values through escapeHtml. These fail if the sinks are reverted to raw
++// template interpolation.
++test('STI table sink (main.js populateSTIRawTable) escapes pathogen fields', () => {
++  const s = src('main.js');
++  assert.ok(s.includes('escapeHtml(p.name)'), 'p.name not escaped in STI table');
++  assert.ok(s.includes('escapeHtml(p.category)'), 'p.category not escaped in STI table');
++  assert.ok(s.includes('escapeHtml(p.curable)'), 'p.curable not escaped in STI table');
++  assert.ok(s.includes('escapeHtml(p.sfHighRiskGroup'), 'sfHighRiskGroup not escaped in STI table');
++});
++
++test('echarts STI tooltip (chartsManager.js) escapes pathogen fields', () => {
++  const s = src('chartsManager.js');
++  assert.ok(s.includes('escapeHtml(pathogen.name)'), 'pathogen.name not escaped in tooltip');
++  assert.ok(s.includes('escapeHtml(pathogen.category)'), 'pathogen.category not escaped in tooltip');
++  assert.ok(s.includes('escapeHtml(pathogen.primaryTreatment'), 'primaryTreatment not escaped in tooltip');
++});
++
++test('graph node tooltip (graphVisualizer.js) escapes label/type/degree', () => {
++  const s = src('graphVisualizer.js');
++  assert.ok(s.includes('escapeHtml(label)'), 'node label not escaped in tooltip');
++  assert.ok(s.includes('escapeHtml(type'), 'node type not escaped in tooltip');
++});
