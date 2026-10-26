@@ -1,0 +1,163 @@
+diff --git a/package.json b/package.json
+index aa4dd69..f088210 100644
+--- a/package.json
++++ b/package.json
+@@ -5,6 +5,7 @@
+   "main": "index.js",
+   "scripts": {
+     "dev": "vite --host",
++    "test": "node --test tests/*.test.mjs",
+     "build": "node -e \"const fs=require('fs'); let h=fs.readFileSync('index.html','utf8').replace(/src=\\\"\\.\\/assets\\/index-[^\\\"]+\\.js\\\"/g, 'src=\\\"/src/main.js\\\"'); fs.writeFileSync('index.html',h);\" && vite build && cp -r dist/assets . && cp dist/index.html .",
+     "preview": "vite preview",
+     "deploy": "npx gh-pages -d dist"
+diff --git a/src/networkGenerator.js b/src/networkGenerator.js
+index 256a819..9bd66a5 100644
+--- a/src/networkGenerator.js
++++ b/src/networkGenerator.js
+@@ -1,5 +1,25 @@
+ import Graph from 'graphology';
+ 
++// Bounds for user-controllable profile parameters. Without these, an extreme
++// (or attacker-crafted) value such as egoPartners=1e9 drives an unbounded
++// O(n^2) node/edge build that freezes the main thread / exhausts memory.
++const MAX_DIRECT_PARTNERS = 500;
++const MAX_DEGREES = 10;
++
++/** Clamp egoPartners to a finite, non-negative integer within [0, MAX_DIRECT_PARTNERS]. */
++function clampEgoPartners(value) {
++  const n = Math.floor(Number(value));
++  if (!Number.isFinite(n) || n < 0) return 0;
++  return Math.min(n, MAX_DIRECT_PARTNERS);
++}
++
++/** Clamp nDegrees to a finite integer within [1, MAX_DEGREES]. */
++function clampDegrees(value) {
++  const n = Math.floor(Number(value));
++  if (!Number.isFinite(n) || n < 1) return 1;
++  return Math.min(n, MAX_DEGREES);
++}
++
+ export class NetworkGenerator {
+   constructor(params = {}) {
+     this.params = params;
+@@ -85,7 +105,8 @@ export class NetworkGenerator {
+     const egoId = createNode('ego', 'Ego (You)', 0);
+ 
+     // 2. Determine Direct Partner Allocations (Degree 1)
+-    const totalPartners = Math.max(0, p.egoPartners);
++    const totalPartners = clampEgoPartners(p.egoPartners);
++    const maxDegrees = clampDegrees(p.nDegrees);
+     const partnerSum = (p.polyculePct + p.monogamousPct + p.slutPct) || 100;
+     const numMono = Math.round((p.monogamousPct / partnerSum) * totalPartners);
+     const numSlut = Math.round((p.slutPct / partnerSum) * totalPartners);
+@@ -139,10 +160,10 @@ export class NetworkGenerator {
+     // 3. Extended Network Expansion with Party Scene Loopback Dynamics
+     const loopbackRatio = ((p.partyLoopbackPct !== undefined ? p.partyLoopbackPct : 40) / 100);
+ 
+-    if (p.previewExtended && p.nDegrees >= 2) {
++    if (p.previewExtended && maxDegrees >= 2) {
+       let currentDegreeNodes = [...directPartnerNodes.map(d => ({ ...d, degree: 1 }))];
+ 
+-      for (let degree = 2; degree <= p.nDegrees; degree++) {
++      for (let degree = 2; degree <= maxDegrees; degree++) {
+         if (graph.order >= maxNodes) break;
+         const nextDegreeNodes = [];
+ 
+@@ -219,7 +240,8 @@ export class NetworkGenerator {
+    */
+   calculateNetworkMetrics(graph) {
+     const p = this.params;
+-    const egoPartners = p.egoPartners;
++    const egoPartners = clampEgoPartners(p.egoPartners);
++    const maxDegrees = clampDegrees(p.nDegrees);
+     const loopbackRatio = ((p.partyLoopbackPct !== undefined ? p.partyLoopbackPct : 40) / 100);
+     
+     const slutRatio = p.slutPct / 100;
+@@ -236,7 +258,7 @@ export class NetworkGenerator {
+     let cumulativeTheoretical = 1;
+     const maxSubculturePoolSize = p.demographicProfile === 'sf_high_risk' ? 50000 : 500000;
+ 
+-    for (let d = 1; d <= p.nDegrees; d++) {
++    for (let d = 1; d <= maxDegrees; d++) {
+       if (d === 1) {
+         const d1Count = Math.min(maxSubculturePoolSize, egoPartners);
+         theoreticalCountByDegree.push(d1Count);
+diff --git a/tests/networkGeneratorBounds.test.mjs b/tests/networkGeneratorBounds.test.mjs
+new file mode 100644
+index 0000000..0ef6806
+--- /dev/null
++++ b/tests/networkGeneratorBounds.test.mjs
+@@ -0,0 +1,73 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { NetworkGenerator } from '../src/networkGenerator.js';
++
++// Baseline parameter set mirroring AppController.defaultParams (src/main.js)
++const BASE_PARAMS = {
++  demographicProfile: 'hetero_mixed',
++  sessionDurationMin: 45,
++  ejaculationPct: 47,
++  exposureCurveModel: 'linear',
++  fluidActsPerMonth: 50,
++  casualActsInitial: 1,
++  coolidgeDecayRate: 0.2,
++  casualActsFloor: 10,
++  pctAnalSex: 0,
++  pctVaginalSex: 100,
++  pctOralSex: 100,
++  pctSkinContact: 100,
++  egoPartners: 2,
++  monogamousPct: 32,
++  polyculePct: 100,
++  slutPct: 0,
++  polyculeSize: 7,
++  slutAvgPartners: 6,
++  sluttinessIndex: 0.86,
++  cheatingLikelihood: 10,
++  nDegrees: 3,
++  partyLoopbackPct: 40,
++  condomUsageInternal: 0.0,
++  condomUsageExternal: 0.9,
++  condomUsageCheating: 0.1,
++  newPartnersPerMonth: 0.5,
++  previewExtended: true,
++  testingCadenceMonths: 3,
++  financialAccessIndex: 85,
++};
++
++test('generateGraph bounds node/edge count for extreme egoPartners', () => {
++  const ng = new NetworkGenerator({ ...BASE_PARAMS, egoPartners: 10000, polyculePct: 100 });
++  const t0 = Date.now();
++  const g = ng.generateGraph();
++  const ms = Date.now() - t0;
++  // Direct partners must be capped (500, +ego +cheater-secret nodes) instead of 10000
++  assert.ok(g.order <= 1001, `graph.order ${g.order} exceeds bound 1001`);
++  assert.ok(g.size < 150000, `graph.size ${g.size} exceeds edge bound`);
++  assert.ok(ms < 10000, `generateGraph took ${ms}ms (main-thread freeze)`);
++});
++
++test('generateGraph still respects normal profile values (no regression)', () => {
++  const ng = new NetworkGenerator({ ...BASE_PARAMS, egoPartners: 8, slutPct: 30 });
++  const g = ng.generateGraph();
++  assert.ok(g.order >= 9, `expected at least ego + 8 partners, got ${g.order}`);
++  assert.ok(g.order < 300);
++});
++
++test('calculateNetworkMetrics bounds the degree loop for extreme nDegrees', () => {
++  const ng = new NetworkGenerator({ ...BASE_PARAMS, egoPartners: 5, nDegrees: 100000 });
++  const g = ng.generateGraph();
++  const metrics = ng.calculateNetworkMetrics(g);
++  // theoreticalCountByDegree must be capped at MAX_DEGREES + 1 entries
++  assert.ok(
++    metrics.theoreticalCountByDegree.length <= 11,
++    `theoreticalCountByDegree length ${metrics.theoreticalCountByDegree.length} exceeds bound 11`
++  );
++});
++
++test('non-finite / negative egoPartners are treated as safe values', () => {
++  for (const bad of ['<script>', 'NaN', -50, null]) {
++    const ng = new NetworkGenerator({ ...BASE_PARAMS, egoPartners: bad });
++    const g = ng.generateGraph();
++    assert.ok(g.order <= 501, `bad egoPartners ${JSON.stringify(bad)} produced ${g.order} nodes`);
++  }
++});

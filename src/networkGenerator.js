@@ -1,5 +1,25 @@
 import Graph from 'graphology';
 
+// Bounds for user-controllable profile parameters. Without these, an extreme
+// (or attacker-crafted) value such as egoPartners=1e9 drives an unbounded
+// O(n^2) node/edge build that freezes the main thread / exhausts memory.
+const MAX_DIRECT_PARTNERS = 500;
+const MAX_DEGREES = 10;
+
+/** Clamp egoPartners to a finite, non-negative integer within [0, MAX_DIRECT_PARTNERS]. */
+function clampEgoPartners(value) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, MAX_DIRECT_PARTNERS);
+}
+
+/** Clamp nDegrees to a finite integer within [1, MAX_DEGREES]. */
+function clampDegrees(value) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, MAX_DEGREES);
+}
+
 export class NetworkGenerator {
   constructor(params = {}) {
     this.params = params;
@@ -85,7 +105,8 @@ export class NetworkGenerator {
     const egoId = createNode('ego', 'Ego (You)', 0);
 
     // 2. Determine Direct Partner Allocations (Degree 1)
-    const totalPartners = Math.max(0, p.egoPartners);
+    const totalPartners = clampEgoPartners(p.egoPartners);
+    const maxDegrees = clampDegrees(p.nDegrees);
     const partnerSum = (p.polyculePct + p.monogamousPct + p.slutPct) || 100;
     const numMono = Math.round((p.monogamousPct / partnerSum) * totalPartners);
     const numSlut = Math.round((p.slutPct / partnerSum) * totalPartners);
@@ -139,10 +160,10 @@ export class NetworkGenerator {
     // 3. Extended Network Expansion with Party Scene Loopback Dynamics
     const loopbackRatio = ((p.partyLoopbackPct !== undefined ? p.partyLoopbackPct : 40) / 100);
 
-    if (p.previewExtended && p.nDegrees >= 2) {
+    if (p.previewExtended && maxDegrees >= 2) {
       let currentDegreeNodes = [...directPartnerNodes.map(d => ({ ...d, degree: 1 }))];
 
-      for (let degree = 2; degree <= p.nDegrees; degree++) {
+      for (let degree = 2; degree <= maxDegrees; degree++) {
         if (graph.order >= maxNodes) break;
         const nextDegreeNodes = [];
 
@@ -219,7 +240,8 @@ export class NetworkGenerator {
    */
   calculateNetworkMetrics(graph) {
     const p = this.params;
-    const egoPartners = p.egoPartners;
+    const egoPartners = clampEgoPartners(p.egoPartners);
+    const maxDegrees = clampDegrees(p.nDegrees);
     const loopbackRatio = ((p.partyLoopbackPct !== undefined ? p.partyLoopbackPct : 40) / 100);
     
     const slutRatio = p.slutPct / 100;
@@ -236,7 +258,7 @@ export class NetworkGenerator {
     let cumulativeTheoretical = 1;
     const maxSubculturePoolSize = p.demographicProfile === 'sf_high_risk' ? 50000 : 500000;
 
-    for (let d = 1; d <= p.nDegrees; d++) {
+    for (let d = 1; d <= maxDegrees; d++) {
       if (d === 1) {
         const d1Count = Math.min(maxSubculturePoolSize, egoPartners);
         theoreticalCountByDegree.push(d1Count);
