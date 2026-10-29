@@ -219,6 +219,12 @@ export class NetworkGenerator {
    */
   calculateNetworkMetrics(graph) {
     const p = this.params;
+    // Cap the modeled network depth to bound the O(n) loop and the
+    // theoreticalCountByDegree array below. The UI slider itself allows at most
+    // 10 degrees; clamping here defends against an unbounded nDegrees supplied
+    // via a shared profile URL or imported JSON (which would otherwise freeze
+    // the tab or exhaust memory).
+    const nDegrees = Math.max(1, Math.min(10, Math.round(p.nDegrees) || 1));
     const egoPartners = p.egoPartners;
     const loopbackRatio = ((p.partyLoopbackPct !== undefined ? p.partyLoopbackPct : 40) / 100);
     
@@ -236,7 +242,7 @@ export class NetworkGenerator {
     let cumulativeTheoretical = 1;
     const maxSubculturePoolSize = p.demographicProfile === 'sf_high_risk' ? 50000 : 500000;
 
-    for (let d = 1; d <= p.nDegrees; d++) {
+    for (let d = 1; d <= nDegrees; d++) {
       if (d === 1) {
         const d1Count = Math.min(maxSubculturePoolSize, egoPartners);
         theoreticalCountByDegree.push(d1Count);
