@@ -1,0 +1,129 @@
+diff --git a/package.json b/package.json
+index aa4dd69..38d8a2b 100644
+--- a/package.json
++++ b/package.json
+@@ -4,6 +4,7 @@
+   "type": "module",
+   "main": "index.js",
+   "scripts": {
++    "test": "node --test tests/*.test.js",
+     "dev": "vite --host",
+     "build": "node -e \"const fs=require('fs'); let h=fs.readFileSync('index.html','utf8').replace(/src=\\\"\\.\\/assets\\/index-[^\\\"]+\\.js\\\"/g, 'src=\\\"/src/main.js\\\"'); fs.writeFileSync('index.html',h);\" && vite build && cp -r dist/assets . && cp dist/index.html .",
+     "preview": "vite preview",
+diff --git a/src/main.js b/src/main.js
+index 1db32d5..8c18dfc 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -6,6 +6,7 @@ import { STIRiskCalculator } from './riskCalculator.js';
+ import { ChartsManager } from './chartsManager.js';
+ import { PartnerOptimizer } from './partnerOptimizer.js';
+ import { ProfileManager } from './profileManager.js';
++import { buildStiTableRows } from './utils.js';
+ 
+ class AppController {
+   constructor() {
+@@ -1144,15 +1145,8 @@ class AppController {
+     const tbody = document.getElementById('sti-table-body');
+     if (!tbody) return;
+ 
+-    tbody.innerHTML = pathogens.slice(0, 15).map(p => `
+-      <tr>
+-        <td><strong>${p.name}</strong></td>
+-        <td>${p.category}</td>
+-        <td>${p.curable}</td>
+-        <td>${p.sfHighRiskGroup || 'General'}</td>
+-        <td>${p.condomTypicalEfficacy}%</td>
+-      </tr>
+-    `).join('');
++    // Escape untrusted (CSV-derived) values before they reach innerHTML (CWE-79).
++    tbody.innerHTML = buildStiTableRows(pathogens);
+   }
+ 
+   openShareModal() {
+diff --git a/src/utils.js b/src/utils.js
+new file mode 100644
+index 0000000..d8cab4d
+--- /dev/null
++++ b/src/utils.js
+@@ -0,0 +1,40 @@
++/**
++ * Small pure DOM-escaping helpers.
++ *
++ * These keep HTML construction safe when untrusted values (e.g. CSV column
++ * values supplied by the user) are interpolated into innerHTML. Keeping the
++ * logic pure (no DOM access) makes it directly unit-testable.
++ */
++
++/**
++ * HTML-encode a value so it can be interpolated safely into innerHTML.
++ * Non-string values are coerced; null/undefined become an empty string.
++ */
++export function escapeHtml(value) {
++  if (value === null || value === undefined) return '';
++  return String(value)
++    .replace(/&/g, '&amp;')
++    .replace(/</g, '&lt;')
++    .replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;')
++    .replace(/'/g, '&#39;');
++}
++
++/**
++ * Build the escaped HTML rows for the STI reference table.
++ * Mirrors the column layout used by AppController.populateSTIRawTable.
++ */
++export function buildStiTableRows(pathogens) {
++  return (pathogens || [])
++    .slice(0, 15)
++    .map(p => `
++      <tr>
++        <td><strong>${escapeHtml(p.name)}</strong></td>
++        <td>${escapeHtml(p.category)}</td>
++        <td>${escapeHtml(p.curable)}</td>
++        <td>${escapeHtml(p.sfHighRiskGroup || 'General')}</td>
++        <td>${escapeHtml(p.condomTypicalEfficacy)}%</td>
++      </tr>
++    `)
++    .join('');
++}
+diff --git a/tests/xss.test.js b/tests/xss.test.js
+new file mode 100644
+index 0000000..a8f161c
+--- /dev/null
++++ b/tests/xss.test.js
+@@ -0,0 +1,35 @@
++import { test } from 'node:test';
++import assert from 'node:assert';
++import { escapeHtml, buildStiTableRows } from '../src/utils.js';
++
++// Regression test for CWE-79: AppController.populateSTIRawTable() used to build
++// the STI reference table with an unescaped template literal and assign it to
++// tbody.innerHTML, so an attacker-controlled CSV field (e.g. Pathogen_Name)
++// such as <img src=1 onerror=...> executed as live HTML/JS (DOM XSS).
++
++test('escapeHtml neutralizes markup and special characters', () => {
++  assert.equal(escapeHtml('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
++  assert.equal(escapeHtml('a"b\'c<d>e&f'), 'a&quot;b&#39;c&lt;d&gt;e&amp;f');
++  assert.equal(escapeHtml(null), '');
++  assert.equal(escapeHtml(undefined), '');
++  assert.equal(escapeHtml(85), '85');
++});
++
++test('buildStiTableRows does not emit attacker-controlled raw tags (CWE-79 regression)', () => {
++  const rows = buildStiTableRows([
++    {
++      name: '<svg/onload=alert(1)>',
++      category: '"><script>alert(1)</script>',
++      curable: '<img src=1 onerror=alert(2)>',
++      sfHighRiskGroup: '"><iframe src=javascript:alert(3)>',
++      condomTypicalEfficacy: 85,
++    },
++  ]);
++
++  assert.ok(!/<svg/i.test(rows), 'raw <svg> tag must not appear');
++  assert.ok(!/<script/i.test(rows), 'raw <script> tag must not appear');
++  assert.ok(!/<img/i.test(rows), 'raw <img> tag must not appear');
++  assert.ok(!/<iframe/i.test(rows), 'raw <iframe> tag must not appear');
++  assert.ok(rows.includes('&lt;svg'), 'payload should be HTML-escaped');
++  assert.ok(rows.includes('&lt;script'), 'payload should be HTML-escaped');
++});
